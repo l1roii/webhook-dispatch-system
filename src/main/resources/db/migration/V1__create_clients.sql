@@ -4,7 +4,6 @@
       password_hash VARCHAR(255) NOT NULL
   );
 
-  Then seed two clients:
   INSERT INTO client (id, username, password_hash) VALUES
       (gen_random_uuid(), 'client_a',
   '$2a$10$GRBPsmLwxYleilSJtEkgdeB7XP5bWd50BXSrrdXJF3K6GuCOY3Fwy'),
