@@ -1,0 +1,174 @@
+version: "3"
+
+vars:
+  BASE_URL: http://localhost:8080
+  INTERNAL_TOKEN: "{{.INTERNAL_TOKEN | default \"change-me-secret\"}}"
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure
+  # ---------------------------------------------------------------------------
+
+  infra:up:
+    desc: Start PostgreSQL and Kafka
+    cmd: docker compose up -d
+
+  infra:down:
+    desc: Stop and remove containers
+    cmd: docker compose down
+
+  infra:logs:
+    desc: Tail container logs
+    cmd: docker compose logs -f
+
+  # ---------------------------------------------------------------------------
+  # Application
+  # ---------------------------------------------------------------------------
+
+  dev:
+    desc: Start the app in dev mode (requires .env to be sourced)
+    cmd: set -a && source .env && set +a && ./mvnw quarkus:dev
+
+  build:
+    desc: Compile the project
+    cmd: ./mvnw compile
+
+  # ---------------------------------------------------------------------------
+  # Auth
+  # ---------------------------------------------------------------------------
+
+  login:
+    desc: Login and print the JWT. Usage -- task login USER=client_a PASS=secret-a
+    vars:
+      USER: '{{.USER | default "client_a"}}'
+      PASS: '{{.PASS | default "secret-a"}}'
+    cmd: |
+      curl -s -X POST {{.BASE_URL}}/auth/login \
+        -H "Content-Type: application/json" \
+        -d '{"username":"{{.USER}}","password":"{{.PASS}}"}' | jq .
+
+  token:
+    desc: Export TOKEN env var. Usage -- source <(task token USER=client_a PASS=secret-a)
+    vars:
+      USER: '{{.USER | default "client_a"}}'
+      PASS: '{{.PASS | default "secret-a"}}'
+    cmd: |
+      echo "export TOKEN=$(curl -s -X POST {{.BASE_URL}}/auth/login \
+        -H 'Content-Type: application/json' \
+        -d '{\"username\":\"{{.USER}}\",\"password\":\"{{.PASS}}\"}' | jq -r .token)"
+
+  # ---------------------------------------------------------------------------
+  # Webhook CRUD  (all require TOKEN env var — run source <(task token) first)
+  # ---------------------------------------------------------------------------
+
+  webhook:create:
+    desc: "Create a webhook. Usage: task webhook:create URL=https://webhook.site/xxx EVENT=USER_CREATED SECRET=mysecret"
+    vars:
+      URL: '{{.URL | default "https://webhook.site/your-id"}}'
+      EVENT: '{{.EVENT | default "USER_CREATED"}}'
+      SECRET: '{{.SECRET | default "my-signing-secret"}}'
+    cmd: |
+      curl -s -X POST {{.BASE_URL}}/api/v1/webhooks \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"targetUrl":"{{.URL}}","eventType":"{{.EVENT}}","secret":"{{.SECRET}}"}' | jq .
+
+  webhook:list:
+    desc: List all webhooks for the authenticated client
+    cmd: |
+      curl -s {{.BASE_URL}}/api/v1/webhooks \
+        -H "Authorization: Bearer $TOKEN" | jq .
+
+  webhook:get:
+    desc: "Get a single webhook. Usage: task webhook:get ID=<uuid>"
+    cmd: |
+      curl -s {{.BASE_URL}}/api/v1/webhooks/{{.ID}} \
+        -H "Authorization: Bearer $TOKEN" | jq .
+
+  webhook:update:
+    desc: "Update a webhook. Usage: task webhook:update ID=<uuid> ACTIVE=false"
+    vars:
+      ACTIVE: '{{.ACTIVE | default "true"}}'
+    cmd: |
+      curl -s -X PUT {{.BASE_URL}}/api/v1/webhooks/{{.ID}} \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"active":{{.ACTIVE}}}' | jq .
+
+  webhook:delete:
+    desc: "Delete a webhook. Usage: task webhook:delete ID=<uuid>"
+    cmd: |
+      curl -s -X DELETE {{.BASE_URL}}/api/v1/webhooks/{{.ID}} \
+        -H "Authorization: Bearer $TOKEN" \
+        -o /dev/null -w "HTTP %{http_code}\n"
+
+  # ---------------------------------------------------------------------------
+  # Events
+  # ---------------------------------------------------------------------------
+
+  event:publish:
+    desc: "Publish an internal event. Usage: task event:publish EVENT=USER_CREATED"
+    vars:
+      EVENT: '{{.EVENT | default "USER_CREATED"}}'
+    cmd: |
+      curl -s -X POST {{.BASE_URL}}/internal/events \
+        -H "X-Internal-Token: {{.INTERNAL_TOKEN}}" \
+        -H "Content-Type: application/json" \
+        -d '{"eventType":"{{.EVENT}}","payload":{"userId":"123","email":"test@example.com"}}' \
+        -o /dev/null -w "HTTP %{http_code}\n"
+
+  # ---------------------------------------------------------------------------
+  # Demos
+  # ---------------------------------------------------------------------------
+
+  demo:isolation:
+    desc: Show that client_b cannot access client_a webhooks (expects 404)
+    vars:
+      TOKEN_A:
+        sh: |
+          curl -s -X POST {{.BASE_URL}}/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"client_a","password":"secret-a"}' | jq -r .token
+      TOKEN_B:
+        sh: |
+          curl -s -X POST {{.BASE_URL}}/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"client_b","password":"secret-b"}' | jq -r .token
+      WEBHOOK_ID:
+        sh: |
+          curl -s {{.BASE_URL}}/api/v1/webhooks \
+            -H "Authorization: Bearer $(curl -s -X POST {{.BASE_URL}}/auth/login \
+              -H 'Content-Type: application/json' \
+              -d '{\"username\":\"client_a\",\"password\":\"secret-a\"}' | jq -r .token)" \
+            | jq -r '.[0].id'
+    cmd: |
+      echo "client_a webhook id: {{.WEBHOOK_ID}}"
+      echo -n "client_b accessing it (expect 404): "
+      curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+        {{.BASE_URL}}/api/v1/webhooks/{{.WEBHOOK_ID}} \
+        -H "Authorization: Bearer {{.TOKEN_B}}"
+
+  demo:e2e:
+    desc: Full flow — login, create webhook, publish event, observe dispatch in logs
+    vars:
+      TOKEN_A:
+        sh: |
+          curl -s -X POST {{.BASE_URL}}/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"client_a","password":"secret-a"}' | jq -r .token
+    cmds:
+      - echo "=== 1. Create webhook for client_a ==="
+      - |
+        curl -s -X POST {{.BASE_URL}}/api/v1/webhooks \
+          -H "Authorization: Bearer {{.TOKEN_A}}" \
+          -H "Content-Type: application/json" \
+          -d '{"targetUrl":"https://webhook.site/your-id","eventType":"USER_CREATED","secret":"demo-secret"}' | jq .
+      - echo "=== 2. Publish USER_CREATED event ==="
+      - |
+        curl -s -X POST {{.BASE_URL}}/internal/events \
+          -H "X-Internal-Token: {{.INTERNAL_TOKEN}}" \
+          -H "Content-Type: application/json" \
+          -d '{"eventType":"USER_CREATED","payload":{"userId":"123","email":"test@example.com"}}' \
+          -o /dev/null -w "HTTP %{http_code}\n"
+      - echo "=== 3. Check app logs for dispatch confirmation ==="

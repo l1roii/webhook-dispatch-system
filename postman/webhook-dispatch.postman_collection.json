@@ -1,0 +1,407 @@
+{
+  "info": {
+    "name": "Webhook Dispatch System",
+    "description": "Collection for the Webhook Dispatch System API.\n\n## Setup\n1. Start the stack: `task infra:up && task dev`\n2. Run the **Login** request — the collection automatically saves the token.\n3. All other requests pick it up via the `{{token}}` variable automatically.\n\n## Environments\nImport `webhook-dispatch.postman_environment.json` alongside this collection.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (client_a)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.token) {",
+                  "    pm.collectionVariables.set('token', json.token);",
+                  "    pm.collectionVariables.set('token_set_at', new Date().toISOString());",
+                  "    console.log('Token saved to collection variable.');",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response contains token', () => pm.expect(json).to.have.property('token'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"client_a\",\n  \"password\": \"secret-a\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Login (client_b)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.token) {",
+                  "    pm.collectionVariables.set('token_b', json.token);",
+                  "    console.log('client_b token saved to {{token_b}}.');",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"client_b\",\n  \"password\": \"secret-b\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Login - invalid credentials (expect 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Error message present', () => {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json).to.have.property('error');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"client_a\",\n  \"password\": \"wrong-password\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Create webhook",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) {",
+                  "    pm.collectionVariables.set('webhook_id', json.id);",
+                  "    console.log('Webhook ID saved: ' + json.id);",
+                  "}",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Secret is masked', () => {",
+                  "    pm.expect(json.secret).to.equal('****');",
+                  "});",
+                  "pm.test('clientId matches logged-in user', () => {",
+                  "    pm.expect(json.clientId).to.equal('client_a');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUrl\": \"https://webhook.site/your-id\",\n  \"eventType\": \"USER_CREATED\",\n  \"secret\": \"my-signing-secret\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "webhooks"]
+            }
+          }
+        },
+        {
+          "name": "List webhooks",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is an array', () => {",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});",
+                  "pm.test('Secrets are masked', () => {",
+                  "    pm.response.json().forEach(w => pm.expect(w.secret).to.equal('****'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "webhooks"]
+            }
+          }
+        },
+        {
+          "name": "Get webhook by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ID matches', () => {",
+                  "    pm.expect(pm.response.json().id).to.equal(pm.collectionVariables.get('webhook_id'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks/{{webhook_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "webhooks", "{{webhook_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Update webhook",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('active is now false', () => {",
+                  "    pm.expect(pm.response.json().active).to.be.false;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks/{{webhook_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "webhooks", "{{webhook_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete webhook",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks/{{webhook_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "webhooks", "{{webhook_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Unauthenticated request (expect 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "webhooks"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "item": [
+        {
+          "name": "Publish event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 202', () => pm.response.to.have.status(202));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Internal-Token", "value": "{{internal_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"USER_CREATED\",\n  \"payload\": {\n    \"userId\": \"123\",\n    \"email\": \"test@example.com\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/internal/events",
+              "host": ["{{base_url}}"],
+              "path": ["internal", "events"]
+            }
+          }
+        },
+        {
+          "name": "Publish event - bad token (expect 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Error message present', () => {",
+                  "    pm.expect(pm.response.json()).to.have.property('error');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Internal-Token", "value": "wrong-token" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"USER_CREATED\",\n  \"payload\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/internal/events",
+              "host": ["{{base_url}}"],
+              "path": ["internal", "events"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Isolation",
+      "item": [
+        {
+          "name": "client_b accessing client_a webhook (expect 404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 404 — not 403, to avoid leaking IDs', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token_b}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks/{{webhook_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "webhooks", "{{webhook_id}}"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "token", "value": "", "description": "JWT for client_a — set automatically by the Login request" },
+    { "key": "token_b", "value": "", "description": "JWT for client_b — set automatically by Login (client_b)" },
+    { "key": "webhook_id", "value": "", "description": "UUID of the last created webhook — set automatically by Create webhook" }
+  ]
+}
